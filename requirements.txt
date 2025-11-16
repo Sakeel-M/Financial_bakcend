@@ -4,3 +4,4 @@ pandas
 openpyxl
 openai
 python-dotenv
+gunicorn
