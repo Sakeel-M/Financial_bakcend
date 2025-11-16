@@ -14,7 +14,7 @@ from excel_processor import processor
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app, origins="https://preview--financify-ai-insight.lovable.app)
+CORS(app, origins="https://financify-ai-insight.vercel.app")
 
 # Set OpenAI API key
 openai.api_key = os.getenv('OPENAI_API_KEY')
