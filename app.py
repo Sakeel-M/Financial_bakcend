@@ -8,20 +8,20 @@ from datetime import datetime
 import io
 import re
 
-# Import Excel processor
+# Import Excel and PDF processors
 from excel_processor import processor
+from pdf_processor import pdf_processor
 
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app, origins="https://financify-ai-insight.vercel.app")
+CORS(app)
 
 # Set OpenAI API key
 openai.api_key = os.getenv('OPENAI_API_KEY')
 
 # Global bank configuration with currency mapping
 GLOBAL_BANK_CONFIG = {
-    # UAE Banks
     'abu dhabi commercial bank': {'country': 'UAE', 'currency': 'AED', 'code': 'ADCB'},
     'adcb': {'country': 'UAE', 'currency': 'AED', 'code': 'ADCB'},
     'first abu dhabi bank': {'country': 'UAE', 'currency': 'AED', 'code': 'FAB'},
@@ -37,23 +37,19 @@ GLOBAL_BANK_CONFIG = {
     'abu dhabi islamic bank': {'country': 'UAE', 'currency': 'AED', 'code': 'ADIB'},
     'adib': {'country': 'UAE', 'currency': 'AED', 'code': 'ADIB'},
 
-    # US Banks
     'bank of america': {'country': 'USA', 'currency': 'USD', 'code': 'BOA'},
     'chase bank': {'country': 'USA', 'currency': 'USD', 'code': 'CHASE'},
     'wells fargo': {'country': 'USA', 'currency': 'USD', 'code': 'WF'},
     'citibank': {'country': 'USA', 'currency': 'USD', 'code': 'CITI'},
 
-    # UK Banks
     'barclays': {'country': 'UK', 'currency': 'GBP', 'code': 'BARCLAYS'},
     'lloyds': {'country': 'UK', 'currency': 'GBP', 'code': 'LLOYDS'},
     'hsbc uk': {'country': 'UK', 'currency': 'GBP', 'code': 'HSBC'},
 
-    # Indian Banks
     'state bank of india': {'country': 'India', 'currency': 'INR', 'code': 'SBI'},
     'hdfc bank': {'country': 'India', 'currency': 'INR', 'code': 'HDFC'},
     'icici bank': {'country': 'India', 'currency': 'INR', 'code': 'ICICI'},
 
-    # European Banks
     'deutsche bank': {'country': 'Germany', 'currency': 'EUR', 'code': 'DB'},
     'bnp paribas': {'country': 'France', 'currency': 'EUR', 'code': 'BNP'},
     'ing bank': {'country': 'Netherlands', 'currency': 'EUR', 'code': 'ING'}
@@ -62,7 +58,6 @@ GLOBAL_BANK_CONFIG = {
 def detect_bank_and_currency(text):
     """Detect bank and determine currency based on bank location"""
     text_lower = text.lower()
-
     for bank_key, bank_info in GLOBAL_BANK_CONFIG.items():
         if bank_key in text_lower:
             return {
@@ -88,13 +83,31 @@ def health_check():
     except ImportError:
         excel_status = False
 
+    # Check PDF processing libraries
+    pdf_status = False
+    try:
+        import pdfplumber
+        pdf_status = True
+    except ImportError:
+        try:
+            import PyPDF2
+            pdf_status = True
+        except ImportError:
+            try:
+                import fitz
+                pdf_status = True
+            except ImportError:
+                pass
+
     openai_status = bool(openai.api_key)
 
     return jsonify({
         "status": "healthy",
         "message": "Universal Finance Analytics API with AI",
         "excel_processing": excel_status,
+        "pdf_processing": pdf_status,
         "openai_integration": openai_status,
+        "supported_formats": ["XLSX", "XLS", "PDF"],
         "supported_currencies": ["AED", "USD", "EUR", "GBP", "INR"],
         "supported_banks": "Global banks supported"
     })
@@ -109,15 +122,26 @@ def upload_file():
         if file.filename == '':
             return jsonify({"error": "No file selected"}), 400
 
-        if not file.filename.endswith(('.xlsx', '.xls')):
-            return jsonify({"error": "Please upload an Excel file (.xlsx or .xls)"}), 400
+        # Check file type
+        file_ext = file.filename.lower().split('.')[-1]
 
-        # Process Excel file
+        if file_ext not in ['xlsx', 'xls', 'pdf']:
+            return jsonify({"error": "Please upload an Excel file (.xlsx, .xls) or PDF file (.pdf)"}), 400
+
+        # Process based on file type
         file_content = io.BytesIO(file.read())
-        result, error = processor.process_excel_file(file_content)
+
+        if file_ext == 'pdf':
+            print(f"[UPLOAD] Processing PDF file: {file.filename}")
+            result, error = pdf_processor.process_pdf_file(file_content)
+            file_type = "PDF"
+        else:
+            print(f"[UPLOAD] Processing Excel file: {file.filename}")
+            result, error = processor.process_excel_file(file_content)
+            file_type = "Excel"
 
         if error or not result:
-            return jsonify({"error": f"Error processing Excel file: {error}"}), 500
+            return jsonify({"error": f"Error processing {file_type} file: {error}"}), 500
 
         # Enhanced bank detection with currency
         bank_detection = detect_bank_and_currency(str(result.get('bank_info', {}).get('bank_name', '')))
@@ -131,13 +155,13 @@ def upload_file():
         })
 
         return jsonify({
-            "message": "Excel file processed successfully!",
+            "message": f"{file_type} file processed successfully!",
             "data": result['transactions'][:20],  # Preview
             "columns": ["Date", "Amount", "Description", "Category"],
             "total_rows": result['total_rows'],
             "full_data": result['transactions'],
             "bank_info": bank_info,
-            "processing_mode": "Real Excel Processing with AI"
+            "processing_mode": result.get('processing_mode', f"{file_type} Processing with AI")
         })
 
     except Exception as e:
@@ -614,7 +638,8 @@ def analyze_data():
 
 if __name__ == '__main__':
     print("Starting Universal Finance Analytics API...")
-    print("Features: Excel Processing + OpenAI Analysis + Multi-Currency Support")
+    print("Features: Excel + PDF Processing + OpenAI Analysis + Multi-Currency Support")
+    print("Supported Formats: .xlsx, .xls, .pdf")
     print("Supported: Global banks with automatic currency detection")
     print("OpenAI Integration:", "Enabled" if openai.api_key else "Disabled (Set OPENAI_API_KEY)")
     print("API available at: http://localhost:5000")
